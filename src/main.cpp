@@ -1,435 +1,438 @@
-#include <ncurses.h>
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include <algorithm>
-
 #include "categories/categories.h"
 #include "memory/core.h"
-#include "tui/focus.h"
-#include "tui/layout.h"
-#include "tui/popup_add_expense.h"
-#include "tui/popup_get_expense.h"
 #include "tui/widgets/input.h"
-#include "tui/widgets/menu.h"
 #include "tui/widgets/table.h"
 
-namespace {
+#include "ftxui/component/component.hpp"
+#include "ftxui/component/component_options.hpp"
+#include "ftxui/component/event.hpp"
+#include "ftxui/component/screen_interactive.hpp"
+#include "ftxui/dom/elements.hpp"
 
-void drawTitlePane(WINDOW* win) {
-  if (!win) return;
-  werase(win);
-  box(win, 0, 0);
-  int h, w;
-  getmaxyx(win, h, w);
-  std::string t1 = "===========Expense Tracker=========";
-  std::string t2 = "Welcome to expense tracker";
-  int x1 = (w - static_cast<int>(t1.size())) / 2;
-  int x2 = (w - static_cast<int>(t2.size())) / 2;
-  if (x1 < 1) x1 = 1;
-  if (x2 < 1) x2 = 1;
-  if (h > 1) mvwprintw(win, 1, x1, "%s", t1.c_str());
-  if (h > 2) mvwprintw(win, 2, x2, "%s", t2.c_str());
-  wrefresh(win);
-}
-
-void drawMenuPane(WINDOW* win, Menu& mainMenu, FocusManager& focus) {
-  if (!win) return;
-  werase(win);
-  box(win, 0, 0);
-  int h, w;
-  getmaxyx(win, h, w);
-  mvwprintw(win, 0, 2, " Menu ");
-  // Sync highlight to focus
-  WidgetId cur = focus.current();
-  bool isMenuFocused = (cur == WidgetId::MenuAdd || cur == WidgetId::MenuGet || cur == WidgetId::MenuRemove);
-  if (cur == WidgetId::MenuAdd) mainMenu.setSelectedIndex(0);
-  else if (cur == WidgetId::MenuGet) mainMenu.setSelectedIndex(1);
-  else if (cur == WidgetId::MenuRemove) mainMenu.setSelectedIndex(2);
-  // Interior rect
-  Rect rc{1, 2, h - 2, w - 4};
-  mainMenu.draw(win, rc, isMenuFocused, 0);
-  wrefresh(win);
-}
-
-void drawFilterPane(WINDOW* win, Input& filterFrom, Input& filterTo, Input& importInput,
-                    Menu& categoryMenu, Menu& subcategoryMenu, FocusManager& focus) {
-  if (!win) return;
-  werase(win);
-  box(win, 0, 0);
-  int h, w;
-  getmaxyx(win, h, w);
-  mvwprintw(win, 0, 2, " Filter ");
-  // Row 1: Filter from ___ to ___
-  if (h > 2) {
-    mvwprintw(win, 1, 2, "Filter");
-    mvwprintw(win, 1, 10, "from");
-    bool fFrom = (focus.current() == WidgetId::FilterFrom);
-    Rect rcFrom{1, 15, 1, 10};
-    if (rcFrom.x + rcFrom.w < w - 1) filterFrom.draw(win, rcFrom, fFrom);
-    mvwprintw(win, 1, 26, "to");
-    bool fTo = (focus.current() == WidgetId::FilterTo);
-    Rect rcTo{1, 29, 1, 10};
-    if (rcTo.x + rcTo.w < w - 1) filterTo.draw(win, rcTo, fTo);
-  }
-  // Row 2: import: input
-  if (h > 3) {
-    mvwprintw(win, 2, 2, "import:");
-    bool fImp = (focus.current() == WidgetId::Import);
-    int impX = 12;
-    int impW = w - impX - 2;
-    if (impW < 6) impW = 6;
-    Rect rc{2, impX, 1, impW};
-    importInput.draw(win, rc, fImp);
-  }
-  // Row 3: Category menu
-  if (h > 4) {
-    mvwprintw(win, 3, 2, "Category:");
-    bool fCat = (focus.current() == WidgetId::Category);
-    int mx = 13;
-    int mw = w - mx - 2;
-    if (mw < 8) mw = 8;
-    Rect rc{3, mx, 1, mw};
-    categoryMenu.draw(win, rc, fCat, 0);
-  }
-  // Row 4: Subcategory menu
-  if (h > 5) {
-    mvwprintw(win, 4, 2, "Subcategory:");
-    bool fSub = (focus.current() == WidgetId::Subcategory);
-    int mx = 14;
-    int mw = w - mx - 2;
-    if (mw < 8) mw = 8;
-    Rect rc{4, mx, 1, mw};
-    subcategoryMenu.draw(win, rc, fSub, 0);
-  }
-  wrefresh(win);
-}
-
-void drawExpensesPane(WINDOW* win, FocusManager& focus,
-                       const ExpenseMemory& memory) {
-  if (!win) return;
-  werase(win);
-  box(win, 0, 0);
-  int h, w;
-  getmaxyx(win, h, w);
-  bool focused = (focus.current() == WidgetId::Expenses);
-  if (focused) wattron(win, A_REVERSE);
-  mvwprintw(win, 0, 2, " Expenses ");
-  if (focused) wattroff(win, A_REVERSE);
-  size_t count = memory.getExpenseCount();
-  double total = memory.getTotalAmount();
-  std::ostringstream oss;
-  oss << std::fixed << std::setprecision(2) << total;
-  std::string totalStr = oss.str();
-  if (h > 1) mvwprintw(win, 1, 2, "Item: %zu", count);
-  if (h > 2) mvwprintw(win, 2, 2, "Total: $ %s", totalStr.c_str());
-  wrefresh(win);
-}
-
-void drawTablePane(WINDOW* win, Table& table, FocusManager& focus) {
-  if (!win) return;
-  werase(win);
-  box(win, 0, 0);
-  int h, w;
-  getmaxyx(win, h, w);
-  Rect inner{1, 1, h - 2, w - 2};
-  bool focused = (focus.current() == WidgetId::TableRow);
-  table.draw(win, inner, focused);
-  wrefresh(win);
-}
-
-}  // namespace
+using namespace ftxui;
 
 int main() {
-  initscr();
-  cbreak();
-  noecho();
-  keypad(stdscr, TRUE);
-  curs_set(0);
-
-  Layout layout;
-  FocusManager focus;
   ExpenseMemory memory;
-
-  std::vector<std::string> mainItems = {"add_expense", "get_expenses",
-                                        "remove_expenses"};
-  Menu mainMenu(mainItems);
-
-  Input filterFrom(InputKind::Date);
-  Input filterTo(InputKind::Date);
-  Input importInput(InputKind::Text, 32, "input");
-
-  Menu categoryMenu(categories);
-  const std::string& initCat = categories.empty() ? std::string() : categories[0];
-  const auto& initSubs = getSubcategories(initCat);
-  Menu subcategoryMenu(initSubs);
-
   Table table;
   table.setStubRows(0);
 
-  PopupAddExpense popup;
-  PopupGetExpense popupGet;
-  popup.setMemory(memory);
-  popupGet.setMemory(memory);
+  // State
+  std::string filterFromStr;
+  std::string filterToStr;
+  std::string importStr;
 
-  auto syncSubMain = [&]() {
-    const std::string& cat = categoryMenu.selected();
-    const auto& subs = getSubcategories(cat);
-    subcategoryMenu.setItems(subs);
-  };
+  std::string addAmountStr;
+  std::string addDateStr;
+  std::string addHint;
 
-  int rows, cols;
-  getmaxyx(stdscr, rows, cols);
-  if (!layout.needsPlaceholder(rows, cols)) {
-    Regions regs = layout.compute(rows, cols);
-    layout.createWindows(regs);
+  std::string getFromStr;
+  std::string getToStr;
+  std::string getHint;
+
+  bool showAdd = false;
+  bool showGet = false;
+
+  // Main menu
+  std::vector<std::string> mainItems = {"add_expense", "get_expenses", "remove_expenses"};
+  int mainSelected = 0;
+
+  // Filter category/subcategory
+  int filterCategorySelected = 0;
+  int filterSubSelected = 0;
+  std::vector<std::string> filterSubs;
+  if (!categories.empty()) {
+    filterSubs = getSubcategories(categories[0]);
   }
 
-  bool running = true;
+  // Add modal category/subcategory
+  int addCategorySelected = 0;
+  int addSubSelected = 0;
+  std::vector<std::string> addSubs;
+  if (!categories.empty()) {
+    addSubs = getSubcategories(categories[0]);
+  }
 
-  while (running) {
-    getmaxyx(stdscr, rows, cols);
-    bool placeholder = layout.needsPlaceholder(rows, cols);
+  auto screen = ScreenInteractive::Fullscreen();
 
-    if (placeholder) {
-      layout.destroyWindows();
-      erase();
-      layout.drawPlaceholder(rows, cols);
-      int ch = getch();
-      if (ch == 'q' || ch == 'Q') {
-        running = false;
-        break;
-      }
-      if (ch == KEY_RESIZE) {
-        // will recompute on next loop iteration
-        continue;
-      }
-      continue;
+  // ----- Menu -----
+  MenuOption mainOpt;
+  mainOpt.on_enter = [&] {
+    if (mainSelected == 0) {
+      showAdd = true;
+    } else if (mainSelected == 1) {
+      showGet = true;
+    } else if (mainSelected == 2) {
+      table.setRows(memory.viewAllExpenses());
+      table.clearChecked();
+      if (!table.rows().empty()) table.setSelectedIndex(0);
     }
+  };
+  auto mainMenu = Menu(&mainItems, &mainSelected, mainOpt);
 
-    if (layout.windowCount() == 0) {
-      Regions regs = layout.compute(rows, cols);
-      layout.createWindows(regs);
-      clear();
-      refresh();
-      layout.touchAndRefresh();
-    }
+  // ----- Filter inputs -----
+  auto filterFromInput = Input(&filterFromStr, "YYYY-MM-DD");
+  auto filterToInput = Input(&filterToStr, "YYYY-MM-DD");
+  auto importInput = Input(&importStr, "input");
 
-    // Draw all panes
-    drawTitlePane(layout.titleWin());
-    drawMenuPane(layout.menuWin(), mainMenu, focus);
-    drawFilterPane(layout.filterWin(), filterFrom, filterTo, importInput, categoryMenu, subcategoryMenu, focus);
-    drawExpensesPane(layout.expensesWin(), focus, memory);
-    drawTablePane(layout.tableWin(), table, focus);
+  // Date validation: max 10 chars
+  filterFromInput |= CatchEvent([&](Event e) {
+    if (e.is_character() && filterFromStr.size() >= 10) return true;
+    return false;
+  });
+  filterToInput |= CatchEvent([&](Event e) {
+    if (e.is_character() && filterToStr.size() >= 10) return true;
+    return false;
+  });
 
-    if (popup.isOpen()) {
-      popup.draw();
-    }
-    if (popupGet.isOpen()) {
-      popupGet.draw();
-    }
-
-    // Position cursor for edit mode inputs
-    if (focus.isEdit()) {
-      curs_set(1);
-    } else if (popup.isOpen() && popup.popupMode() == Mode::Edit) {
-      curs_set(1);
-    } else if (popupGet.isOpen() && popupGet.popupMode() == Mode::Edit) {
-      curs_set(1);
+  // ----- Filter category menus -----
+  MenuOption filterCatOpt;
+  filterCatOpt.on_change = [&] {
+    if (!categories.empty() && filterCategorySelected >= 0 &&
+        filterCategorySelected < (int)categories.size()) {
+      const auto& subs = getSubcategories(categories[filterCategorySelected]);
+      filterSubs = subs;
+      filterSubSelected = 0;
     } else {
-      curs_set(0);
+      filterSubs.clear();
+      filterSubSelected = 0;
     }
+  };
+  auto filterCategoryMenu = Menu(&categories, &filterCategorySelected, filterCatOpt);
+  auto filterSubMenu = Menu(&filterSubs, &filterSubSelected);
 
-    int ch = getch();
-
-    if (ch == KEY_RESIZE) {
-      getmaxyx(stdscr, rows, cols);
-      layout.destroyWindows();
-      if (layout.needsPlaceholder(rows, cols)) {
-        erase();
-        layout.drawPlaceholder(rows, cols);
-      } else {
-        Regions regs = layout.compute(rows, cols);
-        layout.createWindows(regs);
-        // touch and refresh underlying after recompute
-        layout.touchAndRefresh();
-        clear();
-        refresh();
-        if (popup.isOpen()) {
-          popup.close();
-          getmaxyx(stdscr, rows, cols);
-          popup.open(rows, cols);
+  // ----- Table -----
+  auto tableInner = Renderer([&](bool focused) {
+    Elements els;
+    els.push_back(text(Table::header()) | bold);
+    els.push_back(separator());
+    if (table.rows().empty()) {
+      els.push_back(text("No expenses — table shell (visual only)") | dim | hcenter);
+    } else {
+      for (size_t i = 0; i < table.rows().size(); ++i) {
+        const auto& r = table.rows()[i];
+        std::string chk = table.isChecked((int)i) ? "[x]" : "[ ]";
+        std::string line = std::to_string(r.id) + " | " + chk + " | " + r.category + " | " +
+                           r.sub_category + " | " + Table::formatAmount(r.amount) + " | " +
+                           Table::formatDate(r.datetime);
+        Element row = text(line);
+        if ((int)i == table.selectedIndex() && focused) {
+          row = row | inverted;
+        } else if ((int)i == table.selectedIndex()) {
+          row = row | bold;
         }
-        if (popupGet.isOpen()) {
-          popupGet.close();
-          getmaxyx(stdscr, rows, cols);
-          popupGet.open(rows, cols);
+        if (table.isChecked((int)i)) {
+          row = row | color(Color::Green);
         }
+        els.push_back(row);
       }
-      continue;
     }
+    return vbox(els) | flex;
+  });
 
-    if (popup.isOpen()) {
-      bool wasOpen = popup.isOpen();
-      popup.handleKey(ch);
-      if (!popup.isOpen() && wasOpen) {
-        clear();
-        refresh();
-        layout.touchAndRefresh();
-        if (popup.didSubmit()) {
-          table.setRows(memory.viewAllExpenses());
-          table.clearChecked();
+  Component tableComponent = tableInner;
+  tableComponent |= CatchEvent([&](Event e) {
+    if (table.rows().empty()) return false;
+    if (e == Event::ArrowUp || e == Event::Character('k')) {
+      table.moveUp();
+      return true;
+    }
+    if (e == Event::ArrowDown || e == Event::Character('j')) {
+      table.moveDown();
+      return true;
+    }
+    if (e == Event::Character(' ')) {
+      int sel = table.selectedIndex();
+      if (sel >= 0) table.toggleChecked(sel);
+      return true;
+    }
+    if (e == Event::Return) {
+      auto indices = table.checkedIndices();
+      if (!indices.empty()) {
+        std::vector<std::pair<size_t, uint32_t>> toDelete;
+        auto rows = table.rows();
+        for (size_t idx : indices) {
+          if (idx < rows.size()) toDelete.emplace_back(idx, rows[idx].id);
         }
-      }
-      continue;
-    }
-    if (popupGet.isOpen()) {
-      bool wasOpen = popupGet.isOpen();
-      popupGet.handleKey(ch);
-      if (!popupGet.isOpen() && wasOpen) {
-        clear();
-        refresh();
-        layout.touchAndRefresh();
-        if (popupGet.didSubmit()) {
-          table.setRows(popupGet.filtered());
-          focus.setCurrent(WidgetId::TableRow);
-          table.clearChecked();
+        std::sort(toDelete.begin(), toDelete.end(),
+                  [](auto& a, auto& b) { return a.second > b.second; });
+        for (auto& p : toDelete) {
+          memory.deleteExpense(p.second);
         }
-      }
-      continue;
-    }
-
-    WidgetId cur = focus.current();
-    bool isEdit = focus.isEdit();
-
-    // Global quit when not editing
-    if (!isEdit && (ch == 'q' || ch == 'Q')) {
-      running = false;
-      break;
-    }
-
-    if (ch == 27) {  // Esc
-      if (isEdit) {
-        focus.exitEdit();
-        curs_set(0);
-        continue;
-      }
-      // In navigation, Esc does nothing (q quits)
-      continue;
-    }
-
-    // Edit mode delegation for inputs
-    if (isEdit) {
-      Input* curInput = nullptr;
-      if (cur == WidgetId::FilterFrom) curInput = &filterFrom;
-      else if (cur == WidgetId::FilterTo) curInput = &filterTo;
-      else if (cur == WidgetId::Import) curInput = &importInput;
-      if (curInput) {
-        if (curInput->handleKey(ch, true)) {
-          continue;
-        }
-        // Not handled by input (e.g., Tab) -> try focus move
-        WidgetId prev = focus.current();
-        WidgetId nxt = focus.translate(ch);
-        if (nxt != prev) {
-          curs_set(0);
-        }
-        continue;
-      } else {
-        focus.exitEdit();
-        curs_set(0);
-      }
-    }
-
-    // Widget-internal j/k for Category/Subcategory/Table
-    if (cur == WidgetId::Category) {
-      if (ch == 'j' || ch == 'k' || ch == KEY_DOWN || ch == KEY_UP) {
-        categoryMenu.handleKey(ch);
-        syncSubMain();
-        continue;
-      }
-    } else if (cur == WidgetId::Subcategory) {
-      if (ch == 'j' || ch == 'k' || ch == KEY_DOWN || ch == KEY_UP) {
-        subcategoryMenu.handleKey(ch);
-        continue;
-      }
-    } else if (cur == WidgetId::TableRow) {
-      if (ch == 'j' || ch == 'k' || ch == KEY_DOWN || ch == KEY_UP) {
-        table.handleKey(ch);
-        continue;
-      }
-      if (ch == ' ') {
-        int sel = table.selectedIndex();
-        if (sel >= 0) table.toggleChecked(sel);
-        continue;
-      }
-      if (ch == 10 || ch == 13 || ch == KEY_ENTER || ch == '\n') {
-        auto indices = table.checkedIndices();
-        if (!indices.empty()) {
-          // Collect ids for descending delete to avoid shift
-          std::vector<std::pair<size_t, uint32_t>> toDelete;
-          auto rows = table.rows();
-          for (size_t idx : indices) {
-            if (idx < rows.size()) toDelete.emplace_back(idx, rows[idx].id);
-          }
-          std::sort(toDelete.begin(), toDelete.end(),
-                    [](auto& a, auto& b) { return a.second > b.second; });
-          // Also sort by index descending as fallback if id duplicates
-          for (auto& p : toDelete) {
-            memory.deleteExpense(p.second);
-          }
-          table.setRows(memory.viewAllExpenses());
-          table.clearChecked();
-        }
-        continue;
-      }
-    }
-
-    // Enter handling for menu and inputs
-    if (ch == 10 || ch == 13 || ch == KEY_ENTER || ch == '\n') {
-      if (cur == WidgetId::MenuAdd) {
-        getmaxyx(stdscr, rows, cols);
-        popup.open(rows, cols);
-        continue;
-      }
-      if (cur == WidgetId::MenuGet) {
-        getmaxyx(stdscr, rows, cols);
-        popupGet.open(rows, cols);
-        continue;
-      }
-      if (cur == WidgetId::MenuRemove) {
         table.setRows(memory.viewAllExpenses());
         table.clearChecked();
-        focus.setCurrent(WidgetId::TableRow);
-        continue;
       }
-      if (cur == WidgetId::FilterFrom || cur == WidgetId::FilterTo || cur == WidgetId::Import) {
-        focus.enterEdit();
-        curs_set(1);
-        continue;
+      return true;
+    }
+    return false;
+  });
+
+  // ----- Add modal -----
+  MenuOption addCatOpt;
+  addCatOpt.on_change = [&] {
+    if (!categories.empty() && addCategorySelected >= 0 &&
+        addCategorySelected < (int)categories.size()) {
+      const auto& subs = getSubcategories(categories[addCategorySelected]);
+      addSubs = subs;
+      addSubSelected = 0;
+    } else {
+      addSubs.clear();
+      addSubSelected = 0;
+    }
+  };
+  auto addCategoryMenu = Menu(&categories, &addCategorySelected, addCatOpt);
+  auto addSubMenu = Menu(&addSubs, &addSubSelected);
+
+  auto addAmountInput = Input(&addAmountStr, "x.xx");
+  auto addDateInput = Input(&addDateStr, "YYYY-MM-DD");
+
+  addAmountInput |= CatchEvent([&](Event e) {
+    if (!e.is_character()) return false;
+    char c = e.character()[0];
+    if (c != '.' && !std::isdigit(static_cast<unsigned char>(c))) return true;
+    if (!IsValidAmountInsertion(addAmountStr, addAmountStr.size(), c)) return true;
+    if (addAmountStr.size() >= 32) return true;
+    return false;
+  });
+  addDateInput |= CatchEvent([&](Event e) {
+    if (e.is_character() && addDateStr.size() >= 10) return true;
+    return false;
+  });
+
+  auto addSubmit = Button("Submit", [&] {
+    addHint.clear();
+    if (addAmountStr.empty()) {
+      addHint = "Amount required";
+      return;
+    }
+    double amt = 0;
+    try {
+      size_t pos = 0;
+      amt = std::stod(addAmountStr, &pos);
+      if (pos != addAmountStr.size()) throw std::invalid_argument("trailing");
+    } catch (...) {
+      addHint = "Invalid amount";
+      return;
+    }
+    auto dt = std::chrono::system_clock::now();
+    if (!addDateStr.empty()) {
+      auto parsed = parseYYYYMMDD(addDateStr);
+      if (!parsed) {
+        addHint = "Invalid date YYYY-MM-DD";
+        return;
       }
+      dt = *parsed;
+    }
+    std::string cat;
+    if (!categories.empty() && addCategorySelected >= 0 &&
+        addCategorySelected < (int)categories.size()) {
+      cat = categories[addCategorySelected];
+    }
+    std::string sub;
+    if (!addSubs.empty() && addSubSelected >= 0 && addSubSelected < (int)addSubs.size()) {
+      sub = addSubs[addSubSelected];
+    }
+    ExpenseRecord rec;
+    rec.id = 0;
+    rec.amount = amt;
+    rec.category = cat;
+    rec.sub_category = sub;
+    rec.datetime = dt;
+    memory.addExpense(rec);
+    table.setRows(memory.viewAllExpenses());
+    table.clearChecked();
+    if (!table.rows().empty()) table.setSelectedIndex(0);
+    addAmountStr.clear();
+    addDateStr.clear();
+    addHint.clear();
+    showAdd = false;
+  });
+  auto addCancel = Button("Cancel", [&] {
+    showAdd = false;
+    addHint.clear();
+  });
+
+  auto getFromInput = Input(&getFromStr, "YYYY-MM-DD");
+  auto getToInput = Input(&getToStr, "YYYY-MM-DD");
+  getFromInput |= CatchEvent([&](Event e) {
+    if (e.is_character() && getFromStr.size() >= 10) return true;
+    return false;
+  });
+  getToInput |= CatchEvent([&](Event e) {
+    if (e.is_character() && getToStr.size() >= 10) return true;
+    return false;
+  });
+
+  auto getSubmit = Button("Submit", [&] {
+    getHint.clear();
+    if (getFromStr.empty() || getToStr.empty()) {
+      getHint = "Both dates required YYYY-MM-DD";
+      return;
+    }
+    auto pf = parseYYYYMMDD(getFromStr);
+    auto pt = parseYYYYMMDD(getToStr);
+    if (!pf) {
+      getHint = "Invalid date_from YYYY-MM-DD";
+      return;
+    }
+    if (!pt) {
+      getHint = "Invalid date_to YYYY-MM-DD";
+      return;
+    }
+    if (*pf > *pt) {
+      getHint = "date_from must be <= date_to";
+      return;
+    }
+    auto filtered = memory.getExpensesByDateTime(*pf, *pt);
+    table.setRows(filtered);
+    table.clearChecked();
+    if (!filtered.empty()) table.setSelectedIndex(0);
+    getHint.clear();
+    showGet = false;
+  });
+  auto getCancel = Button("Cancel", [&] {
+    showGet = false;
+    getHint.clear();
+  });
+
+  // Containers
+  auto filterContainer = Container::Vertical({
+      filterFromInput,
+      filterToInput,
+      importInput,
+      filterCategoryMenu,
+      filterSubMenu,
+  });
+
+  auto addModalContainer = Container::Vertical({
+      addCategoryMenu,
+      addSubMenu,
+      addAmountInput,
+      addDateInput,
+      addSubmit,
+      addCancel,
+  });
+
+  auto getModalContainer = Container::Vertical({
+      getFromInput,
+      getToInput,
+      getSubmit,
+      getCancel,
+  });
+
+  // Main focus container: Menu, filter, table
+  auto mainContainer = Container::Vertical({
+      mainMenu,
+      filterContainer,
+      tableComponent,
+  });
+
+  // Renderer for main UI
+  auto mainRenderer = Renderer(mainContainer, [&] {
+    Element title = vbox({
+                            text("===========Expense Tracker=========") | bold | hcenter,
+                            text("Welcome to expense tracker") | hcenter,
+                        }) |
+                    border;
+
+    Element menuPane = vbox({
+                            text("Menu") | bold | hcenter,
+                            mainMenu->Render(),
+                        }) |
+                       border | size(WIDTH, EQUAL, 20);
+
+    Element filterPane = vbox({
+                              hbox({text("Filter from: "), filterFromInput->Render() | flex}),
+                              hbox({text(" to: "), filterToInput->Render() | flex}),
+                              hbox({text("import: "), importInput->Render() | flex}),
+                              hbox({text("Category: "), filterCategoryMenu->Render() | flex}),
+                              hbox({text("Subcat: "), filterSubMenu->Render() | flex}),
+                          }) |
+                         border | flex;
+
+    Element expensesPane = vbox({
+                               text("Expenses") | bold | hcenter,
+                               text("Item: " + std::to_string(memory.getExpenseCount())),
+                               text("Total: $ " + Table::formatAmount(memory.getTotalAmount())),
+                           }) |
+                           border | size(WIDTH, EQUAL, 20);
+
+    Element middle = hbox({menuPane, filterPane, expensesPane}) | size(HEIGHT, EQUAL, 8);
+
+    Element tableElem = tableComponent->Render() | border | flex;
+
+    Element root = vbox({title, middle, tableElem}) | flex;
+
+    // Modal overlay via dbox
+    if (showAdd) {
+      Element modalContent = vbox({
+                                     text("Add Expense") | bold | hcenter,
+                                     separator(),
+                                     hbox({text("Category: "), addCategoryMenu->Render() | flex}),
+                                     hbox({text("Subcategory: "), addSubMenu->Render() | flex}),
+                                     hbox({text("Total: "), addAmountInput->Render() | flex}),
+                                     hbox({text("Date: "), addDateInput->Render() | flex}),
+                                     hbox({addSubmit->Render() | flex, addCancel->Render() | flex}) | hcenter,
+                                     text(addHint.empty() ? "Tab navigate  Enter select  Esc/q close" : addHint) |
+                                         hcenter |
+                                         (addHint.empty() ? dim : color(Color::Red)),
+                                 }) |
+                             border | size(WIDTH, GREATER_THAN, 58) | size(HEIGHT, GREATER_THAN, 14);
+      Element modal = window(text("Add Expense"), modalContent) | center;
+      root = dbox({root, modal | clear_under | center});
+    } else if (showGet) {
+      Element modalContent = vbox({
+                                     text("Get Expenses") | bold | hcenter,
+                                     separator(),
+                                     hbox({text("Date from: "), getFromInput->Render() | flex}),
+                                     hbox({text("Date to: "), getToInput->Render() | flex}),
+                                     hbox({getSubmit->Render() | flex, getCancel->Render() | flex}) | hcenter,
+                                     text(getHint.empty() ? "Tab navigate  Enter select  Esc cancel" : getHint) |
+                                         hcenter |
+                                         (getHint.empty() ? dim : color(Color::Red)),
+                                 }) |
+                             border | size(WIDTH, GREATER_THAN, 58) | size(HEIGHT, GREATER_THAN, 10);
+      Element modal = window(text("Get Expenses"), modalContent) | center;
+      root = dbox({root, modal | clear_under | center});
     }
 
-    // Printable auto-enter edit for inputs (navigation mode)
-    if ((cur == WidgetId::FilterFrom || cur == WidgetId::FilterTo || cur == WidgetId::Import) &&
-        ch >= 32 && ch <= 126) {
-      focus.enterEdit();
-      curs_set(1);
-      Input* curInput = nullptr;
-      if (cur == WidgetId::FilterFrom) curInput = &filterFrom;
-      else if (cur == WidgetId::FilterTo) curInput = &filterTo;
-      else curInput = &importInput;
-      curInput->handleKey(ch, true);
-      continue;
+    return root;
+  });
+
+  // Global + modal event handling
+  auto top = mainRenderer | CatchEvent([&](Event e) {
+    if (showAdd) {
+      if (e == Event::Escape || e == Event::Character('q') || e == Event::Character('Q')) {
+        showAdd = false;
+        addHint.clear();
+        return true;
+      }
+      // Forward to modal container
+      return addModalContainer->OnEvent(e);
     }
+    if (showGet) {
+      if (e == Event::Escape || e == Event::Character('q') || e == Event::Character('Q')) {
+        showGet = false;
+        getHint.clear();
+        return true;
+      }
+      return getModalContainer->OnEvent(e);
+    }
+    if (e == Event::Character('q') || e == Event::Character('Q')) {
+      screen.ExitLoopClosure()();
+      return true;
+    }
+    return false;
+  });
 
-    // Generic focus navigation via hjkl/Tab
-    focus.translate(ch);
-  }
-
-  layout.destroyWindows();
-  endwin();
+  screen.Loop(top);
   return 0;
 }

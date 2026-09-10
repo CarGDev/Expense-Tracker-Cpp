@@ -27,39 +27,39 @@ This repo is the **C++ implementation** — Python counterpart: [CarGDev/Expense
 
 * Strongly-typed `struct ExpenseRecord` vs Python `dict`
 * STL: `std::vector`, `std::optional`, `std::chrono::system_clock::time_point` + `parseYYYYMMDD` (`src/memory/core.h:33`)
-* Value semantics & RAII for ncurses windows (`src/tui/layout.*`)
-* Terminal UI with `ncurses` (`src/main.cpp:1`, `src/tui/`)
+* Declarative layout with FTXUI (`src/main.cpp`, `src/tui/`)
+* Terminal UI with FTXUI v7.0.3 via CMake FetchContent (auto-resizing, Tab/arrows navigation)
 
 ## 4. Project Structure
 
 ```
 src/
-  main.cpp                 # ncurses app entry, layout & focus loop
+  main.cpp                 # FTXUI app entry, declarative layout & modal loop
   memory/core.{h,cpp}      # ExpenseRecord, ExpenseMemory
   memory/values.h          # auxiliary Expense type
   categories/              # auto/care/home/living/medical/utilities + categories.h
-  tui/layout.* focus.*     # window layout, focus manager
-  tui/popup_add_expense.*  # add flow
-  tui/popup_get_expense.*  # filter/search flow
-  tui/widgets/             # input, menu, table
-Makefile                   # g++ -std=c++17 -lncurses
+  tui/widgets/             # input (validation), table (data + checkbox), menu (stub)
+  tui/popup_add_expense.*  # FTXUI modal builder for add flow
+  tui/popup_get_expense.*  # FTXUI modal builder for filter/search flow
+CMakeLists.txt             # CMake + FetchContent FTXUI v7.0.3
 LICENSE                    # MIT
 ```
 
 ## 5. Prerequisites
 
-* `g++` with C++17, `make`, `ncurses`
-* macOS: `brew install ncurses`
+* `g++` with C++17, `cmake` >= 3.15
+* FTXUI v7.0.3 fetched automatically via CMake FetchContent (requires internet on first build)
+* macOS: `brew install cmake`
 
 ## 6. Build & Run
 
 ```bash
-make
-./expenses
-make clean
+cmake -S . -B build
+cmake --build build
+./build/expenses
 ```
 
-Binary: `expenses` at repo root (gitignored). Requires a terminal with sufficient size; small terminals show a placeholder (`src/tui/layout.cpp`).
+Binary: `build/expenses` (CMake). FTXUI handles terminal resize automatically; no manual 80x24 placeholder.
 
 ## 7. Usage (TUI)
 
