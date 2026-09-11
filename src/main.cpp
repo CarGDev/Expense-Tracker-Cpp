@@ -3,6 +3,7 @@
 #include <chrono>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -48,9 +49,13 @@ int main() {
   // Filter category/subcategory
   int filterCategorySelected = 0;
   int filterSubSelected = 0;
+  std::vector<std::string> filterCategoryItems = {"All categories"};
+  filterCategoryItems.insert(filterCategoryItems.end(), categories.begin(), categories.end());
   std::vector<std::string> filterSubs;
-  if (!categories.empty()) {
-    filterSubs = getSubcategories(categories[0]);
+  filterSubs.push_back("All subcategories");
+  for (const auto& category : categories) {
+    const auto& subs = getSubcategories(category);
+    filterSubs.insert(filterSubs.end(), subs.begin(), subs.end());
   }
 
   // Add modal category/subcategory
@@ -63,17 +68,81 @@ int main() {
 
   auto screen = ScreenInteractive::Fullscreen();
 
+  bool hasActiveFilter = false;
+  ExpenseFilterCriteria activeCriteria;
+  std::string emptyTableMessage = "No expenses";
+
+  auto refreshTableWith = [&](const std::vector<ExpenseRecord>& rows, bool filtered) {
+    table.setRows(rows);
+    table.clearChecked();
+    if (!table.rows().empty()) table.setSelectedIndex(0);
+    emptyTableMessage = filtered ? "No matching expenses" : "No expenses";
+  };
+
+  auto refreshAllRows = [&] {
+    hasActiveFilter = false;
+    activeCriteria = ExpenseFilterCriteria{};
+    refreshTableWith(memory.viewAllExpenses(), false);
+  };
+
+  auto refreshActiveRows = [&] {
+    if (hasActiveFilter) {
+      refreshTableWith(memory.filterExpenses(activeCriteria), true);
+    } else {
+      refreshAllRows();
+    }
+  };
+
+  auto selectedFilterCategory = [&]() -> std::optional<std::string> {
+    if (filterCategorySelected <= 0 || filterCategorySelected >= (int)filterCategoryItems.size()) {
+      return std::nullopt;
+    }
+    return filterCategoryItems[filterCategorySelected];
+  };
+
+  auto selectedFilterSubcategory = [&]() -> std::optional<std::string> {
+    if (filterSubSelected <= 0 || filterSubSelected >= (int)filterSubs.size()) {
+      return std::nullopt;
+    }
+    return filterSubs[filterSubSelected];
+  };
+
+  auto rebuildFilterSubcategories = [&] {
+    filterSubs.clear();
+    filterSubs.push_back("All subcategories");
+    if (auto category = selectedFilterCategory()) {
+      const auto& subs = getSubcategories(*category);
+      filterSubs.insert(filterSubs.end(), subs.begin(), subs.end());
+    } else {
+      for (const auto& category : categories) {
+        const auto& subs = getSubcategories(category);
+        filterSubs.insert(filterSubs.end(), subs.begin(), subs.end());
+      }
+    }
+    filterSubSelected = 0;
+  };
+
+  auto removeCheckedRows = [&] {
+    auto indices = table.checkedIndices();
+    if (indices.empty()) return;
+    auto rows = table.rows();
+    for (size_t idx : indices) {
+      if (idx < rows.size()) memory.deleteExpense(rows[idx].id);
+    }
+    refreshActiveRows();
+  };
+
   // ----- Menu -----
   MenuOption mainOpt;
   mainOpt.on_enter = [&] {
     if (mainSelected == 0) {
       showAdd = true;
     } else if (mainSelected == 1) {
+      getFromStr = filterFromStr;
+      getToStr = filterToStr;
       showGet = true;
     } else if (mainSelected == 2) {
-      table.setRows(memory.viewAllExpenses());
-      table.clearChecked();
-      if (!table.rows().empty()) table.setSelectedIndex(0);
+      removeCheckedRows();
     }
   };
   auto mainMenu = Menu(&mainItems, &mainSelected, mainOpt);
@@ -96,17 +165,9 @@ int main() {
   // ----- Filter category menus -----
   MenuOption filterCatOpt;
   filterCatOpt.on_change = [&] {
-    if (!categories.empty() && filterCategorySelected >= 0 &&
-        filterCategorySelected < (int)categories.size()) {
-      const auto& subs = getSubcategories(categories[filterCategorySelected]);
-      filterSubs = subs;
-      filterSubSelected = 0;
-    } else {
-      filterSubs.clear();
-      filterSubSelected = 0;
-    }
+    rebuildFilterSubcategories();
   };
-  auto filterCategoryMenu = Menu(&categories, &filterCategorySelected, filterCatOpt);
+  auto filterCategoryMenu = Menu(&filterCategoryItems, &filterCategorySelected, filterCatOpt);
   auto filterSubMenu = Menu(&filterSubs, &filterSubSelected);
 
   // ----- Table -----
@@ -115,7 +176,7 @@ int main() {
     els.push_back(text(Table::header()) | bold);
     els.push_back(separator());
     if (table.rows().empty()) {
-      els.push_back(text("No expenses — table shell (visual only)") | dim | hcenter);
+      els.push_back(text(emptyTableMessage) | dim | hcenter);
     } else {
       for (size_t i = 0; i < table.rows().size(); ++i) {
         const auto& r = table.rows()[i];
@@ -155,21 +216,7 @@ int main() {
       return true;
     }
     if (e == Event::Return) {
-      auto indices = table.checkedIndices();
-      if (!indices.empty()) {
-        std::vector<std::pair<size_t, uint32_t>> toDelete;
-        auto rows = table.rows();
-        for (size_t idx : indices) {
-          if (idx < rows.size()) toDelete.emplace_back(idx, rows[idx].id);
-        }
-        std::sort(toDelete.begin(), toDelete.end(),
-                  [](auto& a, auto& b) { return a.second > b.second; });
-        for (auto& p : toDelete) {
-          memory.deleteExpense(p.second);
-        }
-        table.setRows(memory.viewAllExpenses());
-        table.clearChecked();
-      }
+      removeCheckedRows();
       return true;
     }
     return false;
@@ -218,8 +265,9 @@ int main() {
       size_t pos = 0;
       amt = std::stod(addAmountStr, &pos);
       if (pos != addAmountStr.size()) throw std::invalid_argument("trailing");
+      if (amt <= 0.0) throw std::invalid_argument("non-positive");
     } catch (...) {
-      addHint = "Invalid amount";
+      addHint = "Enter a positive amount";
       return;
     }
     auto dt = std::chrono::system_clock::now();
@@ -247,9 +295,7 @@ int main() {
     rec.sub_category = sub;
     rec.datetime = dt;
     memory.addExpense(rec);
-    table.setRows(memory.viewAllExpenses());
-    table.clearChecked();
-    if (!table.rows().empty()) table.setSelectedIndex(0);
+    refreshAllRows();
     addAmountStr.clear();
     addDateStr.clear();
     addHint.clear();
@@ -273,28 +319,40 @@ int main() {
 
   auto getSubmit = Button("Submit", [&] {
     getHint.clear();
-    if (getFromStr.empty() || getToStr.empty()) {
-      getHint = "Both dates required YYYY-MM-DD";
-      return;
+    ExpenseFilterCriteria criteria;
+    if (!getFromStr.empty()) {
+      auto pf = parseYYYYMMDD(getFromStr);
+      if (!pf) {
+        getHint = "Invalid date_from YYYY-MM-DD";
+        return;
+      }
+      criteria.date_from = *pf;
     }
-    auto pf = parseYYYYMMDD(getFromStr);
-    auto pt = parseYYYYMMDD(getToStr);
-    if (!pf) {
-      getHint = "Invalid date_from YYYY-MM-DD";
-      return;
+    if (!getToStr.empty()) {
+      auto pt = parseYYYYMMDD(getToStr);
+      if (!pt) {
+        getHint = "Invalid date_to YYYY-MM-DD";
+        return;
+      }
+      criteria.date_to = *pt;
     }
-    if (!pt) {
-      getHint = "Invalid date_to YYYY-MM-DD";
-      return;
-    }
-    if (*pf > *pt) {
+    if (criteria.date_from && criteria.date_to && *criteria.date_from > *criteria.date_to) {
       getHint = "date_from must be <= date_to";
       return;
     }
-    auto filtered = memory.getExpensesByDateTime(*pf, *pt);
-    table.setRows(filtered);
-    table.clearChecked();
-    if (!filtered.empty()) table.setSelectedIndex(0);
+    criteria.category = selectedFilterCategory();
+    criteria.sub_category = selectedFilterSubcategory();
+    filterFromStr = getFromStr;
+    filterToStr = getToStr;
+    const bool emptyCriteria = !criteria.date_from && !criteria.date_to &&
+                               !criteria.category && !criteria.sub_category;
+    if (emptyCriteria) {
+      refreshAllRows();
+    } else {
+      activeCriteria = criteria;
+      hasActiveFilter = true;
+      refreshTableWith(memory.filterExpenses(activeCriteria), true);
+    }
     getHint.clear();
     showGet = false;
   });
@@ -360,8 +418,8 @@ int main() {
 
     Element expensesPane = vbox({
                                text("Expenses") | bold | hcenter,
-                               text("Item: " + std::to_string(memory.getExpenseCount())),
-                               text("Total: $ " + Table::formatAmount(memory.getTotalAmount())),
+                               text("Item: " + std::to_string(memory.getExpenseCount(table.rows()))),
+                               text("Total: $ " + Table::formatAmount(memory.getTotalAmount(table.rows()))),
                            }) |
                            border | size(WIDTH, EQUAL, 20);
 
@@ -394,12 +452,13 @@ int main() {
                                      separator(),
                                      hbox({text("Date from: "), getFromInput->Render() | flex}),
                                      hbox({text("Date to: "), getToInput->Render() | flex}),
+                                     text("Category/subcategory come from the filter pane") | dim | hcenter,
                                      hbox({getSubmit->Render() | flex, getCancel->Render() | flex}) | hcenter,
                                      text(getHint.empty() ? "Tab navigate  Enter select  Esc cancel" : getHint) |
                                          hcenter |
                                          (getHint.empty() ? dim : color(Color::Red)),
                                  }) |
-                             border | size(WIDTH, GREATER_THAN, 58) | size(HEIGHT, GREATER_THAN, 10);
+                             border | size(WIDTH, GREATER_THAN, 58) | size(HEIGHT, GREATER_THAN, 11);
       Element modal = window(text("Get Expenses"), modalContent) | center;
       root = dbox({root, modal | clear_under | center});
     }

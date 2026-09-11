@@ -3,25 +3,23 @@
 #include <string>
 #include <vector>
 
-#include "ftxui/component/component.hpp"
 #include "../memory/core.h"
+#include "ftxui/component/component.hpp"
 
 using namespace ftxui;
 
 namespace tui {
 
-Component MakeGetExpenseModal(
-    ExpenseMemory* memory,
-    std::string* from_str,
-    std::string* to_str,
-    std::string* hint,
-    std::vector<ExpenseRecord>* out_filtered,
-    bool* did_submit,
-    std::function<void()> on_close) {
+Component MakeGetExpenseModal(ExpenseMemory *memory, std::string *from_str,
+                              std::string *to_str, std::string *hint,
+                              std::vector<ExpenseRecord> *out_filtered,
+                              bool *did_submit,
+                              std::function<void()> on_close) {
   auto from_input = Input(from_str, "YYYY-MM-DD");
   auto to_input = Input(to_str, "YYYY-MM-DD");
   auto submit = Button("Submit", [=] {
-    if (!memory || !hint || !did_submit || !out_filtered) return;
+    if (!memory || !hint || !did_submit || !out_filtered)
+      return;
     hint->clear();
     if (from_str->empty() || to_str->empty()) {
       *hint = "Both dates required YYYY-MM-DD";
@@ -43,10 +41,11 @@ Component MakeGetExpenseModal(
     }
     *out_filtered = memory->getExpensesByDateTime(*pf, *pt);
     *did_submit = true;
-    if (on_close) on_close();
+    if (on_close)
+      on_close();
   });
   auto cancel = Button("Cancel", on_close);
   return Container::Vertical({from_input, to_input, submit, cancel});
 }
 
-}  // namespace tui
+} // namespace tui

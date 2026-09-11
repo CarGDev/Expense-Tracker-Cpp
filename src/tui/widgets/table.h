@@ -8,14 +8,15 @@
 #include "../../memory/core.h"
 
 // Table data model for FTXUI Renderer.
-// Preserves semantics of previous Table: header, format helpers, checkbox logic.
+// Preserves semantics of previous Table: header, format helpers, checkbox
+// logic.
 
 class Table {
- public:
+public:
   Table();
 
-  void setRows(const std::vector<ExpenseRecord>& rows);
-  const std::vector<ExpenseRecord>& rows() const;
+  void setRows(const std::vector<ExpenseRecord> &rows);
+  const std::vector<ExpenseRecord> &rows() const;
 
   void setStubRows(size_t count);
 
@@ -38,9 +39,10 @@ class Table {
   // Helpers for testing/layout
   static std::string header();
   static std::string formatAmount(double amount);
-  static std::string formatDate(const std::chrono::system_clock::time_point& tp);
+  static std::string
+  formatDate(const std::chrono::system_clock::time_point &tp);
 
- private:
+private:
   std::vector<ExpenseRecord> rows_;
   std::vector<char> checked_;
   int selected_;

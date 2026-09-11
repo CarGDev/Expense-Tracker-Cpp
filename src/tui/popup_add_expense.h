@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "ftxui/component/component.hpp"
 #include "../memory/core.h"
+#include "ftxui/component/component.hpp"
 
 // FTXUI modal for adding an expense.
 // Implemented as FTXUI Components (Menu + Input + Button) rendered via
@@ -14,19 +14,14 @@
 
 namespace tui {
 
-ftxui::Component MakeAddExpenseModal(
-    ExpenseMemory* memory,
-    std::string* category_selected,
-    std::string* subcategory_selected,
-    std::string* amount_str,
-    std::string* date_str,
-    std::vector<std::string>* categories,
-    std::vector<std::string>* subcategories,
-    std::string* hint,
-    bool* did_submit,
-    std::function<void()> on_close,
-    std::function<void()> on_subcategory_sync);
+ftxui::Component
+MakeAddExpenseModal(ExpenseMemory *memory, std::string *category_selected,
+                    std::string *subcategory_selected, std::string *amount_str,
+                    std::string *date_str, std::vector<std::string> *categories,
+                    std::vector<std::string> *subcategories, std::string *hint,
+                    bool *did_submit, std::function<void()> on_close,
+                    std::function<void()> on_subcategory_sync);
 
-}  // namespace tui
+} // namespace tui
 
 #endif

@@ -15,12 +15,20 @@ std::vector<ExpenseRecord> expense_store;
 std::size_t get_size_of_expenses_records() { return expense_store.size(); }
 
 void freeMemory() { expense_store.clear(); }
+
+uint32_t nextExpenseId() {
+  uint32_t max_id = 0;
+  for (const auto &rec : expense_store) {
+    max_id = std::max(max_id, rec.id);
+  }
+  return max_id + 1;
+}
 } // namespace
 
 void ExpenseMemory::addExpense(const ExpenseRecord &expense) {
   ExpenseRecord rec = expense;
   if (rec.id == 0) {
-    rec.id = static_cast<uint32_t>(get_size_of_expenses_records() + 1);
+    rec.id = nextExpenseId();
   }
   expense_store.push_back(rec);
 }
@@ -59,35 +67,74 @@ ExpenseRecord ExpenseMemory::viewExpense(std::size_t idx) const {
   return {};
 }
 
+std::vector<ExpenseRecord>
+ExpenseMemory::filterExpenses(const ExpenseFilterCriteria &criteria) const {
+  std::vector<ExpenseRecord> filtered;
+  filtered.reserve(expense_store.size());
+  for (const auto &rec : expense_store) {
+    if (criteria.date_from && rec.datetime < *criteria.date_from) {
+      continue;
+    }
+    if (criteria.date_to && rec.datetime > *criteria.date_to) {
+      continue;
+    }
+    if (criteria.category && rec.category != *criteria.category) {
+      continue;
+    }
+    if (criteria.sub_category && rec.sub_category != *criteria.sub_category) {
+      continue;
+    }
+    filtered.push_back(rec);
+  }
+  return filtered;
+}
+
 std::vector<ExpenseRecord> ExpenseMemory::getExpensesByDateTime(
     std::chrono::system_clock::time_point datetime_from,
     std::chrono::system_clock::time_point datetime_to) const {
-  std::vector<ExpenseRecord> all_expenses;
-  all_expenses.reserve(expense_store.size());
-  for (const auto &rec : expense_store) {
-    if (rec.datetime >= datetime_from && rec.datetime <= datetime_to) {
-      all_expenses.push_back(rec);
-    }
-  }
-  return all_expenses;
+  ExpenseFilterCriteria criteria;
+  criteria.date_from = datetime_from;
+  criteria.date_to = datetime_to;
+  return filterExpenses(criteria);
 }
 
 std::size_t ExpenseMemory::getExpenseCount() const {
   return expense_store.size();
 }
 
+std::size_t ExpenseMemory::getExpenseCount(
+    const std::vector<ExpenseRecord> &records) const {
+  return records.size();
+}
+
 double ExpenseMemory::getTotalAmount() const {
+  return getTotalAmount(expense_store);
+}
+
+double
+ExpenseMemory::getTotalAmount(const std::vector<ExpenseRecord> &records) const {
   double total = 0.0;
-  for (const auto &rec : expense_store) {
+  for (const auto &rec : records) {
     total += rec.amount;
   }
   return total;
 }
 
-std::optional<std::chrono::system_clock::time_point> parseYYYYMMDD(
-    const std::string &s) {
-  if (s.size() != 10) return std::nullopt;
-  if (s[4] != '-' || s[7] != '-') return std::nullopt;
+void ExpenseMemory::clear() { freeMemory(); }
+
+void ExpenseMemory::reset() { clear(); }
+
+void ExpenseMemory::release() {
+  clear();
+  expense_store.shrink_to_fit();
+}
+
+std::optional<std::chrono::system_clock::time_point>
+parseYYYYMMDD(const std::string &s) {
+  if (s.size() != 10)
+    return std::nullopt;
+  if (s[4] != '-' || s[7] != '-')
+    return std::nullopt;
   int y = 0, m = 0, d = 0;
   try {
     y = std::stoi(s.substr(0, 4));
@@ -96,8 +143,10 @@ std::optional<std::chrono::system_clock::time_point> parseYYYYMMDD(
   } catch (...) {
     return std::nullopt;
   }
-  if (m < 1 || m > 12) return std::nullopt;
-  if (d < 1 || d > 31) return std::nullopt;
+  if (m < 1 || m > 12)
+    return std::nullopt;
+  if (d < 1 || d > 31)
+    return std::nullopt;
   std::tm tm{};
   tm.tm_year = y - 1900;
   tm.tm_mon = m - 1;
@@ -109,7 +158,8 @@ std::optional<std::chrono::system_clock::time_point> parseYYYYMMDD(
   // Save original for validation after normalization
   std::tm orig = tm;
   std::time_t t = std::mktime(&tm);
-  if (t == static_cast<std::time_t>(-1)) return std::nullopt;
+  if (t == static_cast<std::time_t>(-1))
+    return std::nullopt;
   // mktime normalizes out-of-range dates; reject if changed
   if (tm.tm_year != orig.tm_year || tm.tm_mon != orig.tm_mon ||
       tm.tm_mday != orig.tm_mday) {

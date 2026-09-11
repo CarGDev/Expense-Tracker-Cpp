@@ -4,28 +4,23 @@
 #include <string>
 #include <vector>
 
+#include "../categories/categories.h"
+#include "../memory/core.h"
 #include "ftxui/component/component.hpp"
 #include "ftxui/component/component_options.hpp"
 #include "ftxui/dom/elements.hpp"
-#include "../categories/categories.h"
-#include "../memory/core.h"
 
 using namespace ftxui;
 
 namespace tui {
 
-Component MakeAddExpenseModal(
-    ExpenseMemory* memory,
-    std::string* category_selected,
-    std::string* subcategory_selected,
-    std::string* amount_str,
-    std::string* date_str,
-    std::vector<std::string>* categories,
-    std::vector<std::string>* subcategories,
-    std::string* hint,
-    bool* did_submit,
-    std::function<void()> on_close,
-    std::function<void()> on_subcategory_sync) {
+Component
+MakeAddExpenseModal(ExpenseMemory *memory, std::string *category_selected,
+                    std::string *subcategory_selected, std::string *amount_str,
+                    std::string *date_str, std::vector<std::string> *categories,
+                    std::vector<std::string> *subcategories, std::string *hint,
+                    bool *did_submit, std::function<void()> on_close,
+                    std::function<void()> on_subcategory_sync) {
   // Category menu: use selected index mapping
   int cat_selected = 0;
   int sub_selected = 0;
@@ -37,7 +32,8 @@ Component MakeAddExpenseModal(
   auto amount_input = Input(amount_str, "x.xx");
   auto date_input = Input(date_str, "YYYY-MM-DD");
   auto submit = Button("Submit", [&] {
-    if (!memory || !hint || !did_submit) return;
+    if (!memory || !hint || !did_submit)
+      return;
     hint->clear();
     if (amount_str->empty()) {
       *hint = "Amount required";
@@ -47,7 +43,8 @@ Component MakeAddExpenseModal(
     try {
       size_t pos = 0;
       amt = std::stod(*amount_str, &pos);
-      if (pos != amount_str->size()) throw std::invalid_argument("trailing");
+      if (pos != amount_str->size())
+        throw std::invalid_argument("trailing");
     } catch (...) {
       *hint = "Invalid amount";
       return;
@@ -72,10 +69,12 @@ Component MakeAddExpenseModal(
     amount_str->clear();
     date_str->clear();
     hint->clear();
-    if (on_close) on_close();
+    if (on_close)
+      on_close();
   });
   auto cancel = Button("Cancel", on_close);
-  return Container::Vertical({cat_menu, sub_menu, amount_input, date_input, submit, cancel});
+  return Container::Vertical(
+      {cat_menu, sub_menu, amount_input, date_input, submit, cancel});
 }
 
-}  // namespace tui
+} // namespace tui
