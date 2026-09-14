@@ -26,9 +26,9 @@ struct ExpenseFilterCriteria {
 class ExpenseMemory {
 public:
   void addExpense(const ExpenseRecord &expense);
-  void deleteExpense(std::size_t idx);
+  void deleteExpense(uint32_t id);
   std::vector<ExpenseRecord> viewAllExpenses() const;
-  ExpenseRecord viewExpense(std::size_t idx) const;
+  ExpenseRecord viewExpense(uint32_t id) const;
   std::vector<ExpenseRecord>
   filterExpenses(const ExpenseFilterCriteria &criteria) const;
   std::vector<ExpenseRecord> getExpensesByDateTime(

@@ -33,18 +33,13 @@ void ExpenseMemory::addExpense(const ExpenseRecord &expense) {
   expense_store.push_back(rec);
 }
 
-void ExpenseMemory::deleteExpense(std::size_t idx) {
+void ExpenseMemory::deleteExpense(uint32_t id) {
   auto it = std::find_if(expense_store.begin(), expense_store.end(),
-                         [idx](const ExpenseRecord &e) {
-                           return e.id == static_cast<uint32_t>(idx);
+                         [id](const ExpenseRecord &e) {
+                           return e.id == id;
                          });
   if (it != expense_store.end()) {
-    expense_store.erase(it);
-    return;
-  }
-  if (idx < expense_store.size()) {
-    expense_store.erase(expense_store.begin() +
-                        static_cast<std::ptrdiff_t>(idx));
+    expense_store.erase(it);    
   }
 }
 
@@ -52,18 +47,12 @@ std::vector<ExpenseRecord> ExpenseMemory::viewAllExpenses() const {
   return expense_store;
 }
 
-ExpenseRecord ExpenseMemory::viewExpense(std::size_t idx) const {
-  if (expense_store.empty()) {
-    return {};
-  }
+ExpenseRecord ExpenseMemory::viewExpense(uint32_t id) const {  
   for (const auto &rec : expense_store) {
-    if (rec.id == static_cast<uint32_t>(idx)) {
+    if (rec.id == id) {
       return rec;
     }
-  }
-  if (idx < expense_store.size()) {
-    return expense_store[idx];
-  }
+  }  
   return {};
 }
 
